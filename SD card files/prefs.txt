@@ -3,4 +3,6 @@ t,t,t,t/ 	USBtoMIDI
 0,1,2,3/ 	MIDItoMIDI
 255/ 		backlight brightness
 0,3,2,1/ 	MIDI thru filter channel
-0/ 		Arrow posisitons
+1/ 		Arrow posisitons
+200/		Number of scenes
+350/		LCD text scroll update time in milliseconds
