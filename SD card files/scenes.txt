@@ -1,0 +1,3 @@
+00:0203;01:ffffffff;/ scene data
+0a:1203111111;01:fff11fffff;/ scene data
+3f:025503;0154:f334efffffff;/ scene data
