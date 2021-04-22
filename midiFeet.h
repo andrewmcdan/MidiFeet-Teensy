@@ -58,6 +58,14 @@
 #endif
 
 class RasPiPico;
+enum out_port_modes : byte
+{
+    SingleOutput = 0x00,
+    DualOutput = 0x01,
+    Disable = 0xff,
+    TS_output = SingleOutput,
+    TRS_output = DualOutput
+};
 
 class PrefsObj
 {
@@ -90,6 +98,13 @@ public:
 
     PASSTHROUGH_PREFS passThrough;
 
+    uint8_t PortModes[4] = {
+        out_port_modes::Disable,
+        out_port_modes::Disable,
+        out_port_modes::Disable,
+        out_port_modes::Disable,
+    };
+
     PrefsObj(){};
 };
 
@@ -112,6 +127,7 @@ enum ESP_SERIAL_COMMANDS_Message
     OkToContinueSendingData = 0x06,
     RequestForTotalNumberOfScene = 0x07,
     RequestToSaveSceneFile = 0x08,
+    RequestToSavePrefsFile = 0x09,
     isMessageNotPacket = 0xa0,
 };
 enum ESP_SERIAL_COMMANDS_Packet
@@ -139,14 +155,7 @@ enum ext_btn_modes : byte
     ExpPedalContinuous = 0x04,
     Disabled = 0xff
 };
-enum out_port_modes : byte
-{
-    SingleOutput = 0x00,
-    DualOutput = 0x01,
-    Disable = 0xff,
-    TS_output = SingleOutput,
-    TRS_output = DualOutput
-};
+
 enum out_port_state : byte
 {
     Tip_On = 0x01,
@@ -896,8 +905,12 @@ class ExtPedalInput{
     private:
     ExtPedalState state_T;
     ExtPedalState state_R;
+    // uint8_t portMode = ext_btn_modes::Disabled;
     public:
     ExtPedalInput(){}
+    // uint8_t mode(){
+    //     return this->portMode;
+    // }
 };
 
 class RasPiPico{
@@ -952,22 +965,45 @@ class RasPiPico{
             this->updateIntervalTimer=0;
             // get update from PICO, and store values into private members
             int numReadByte = 0;
-            byte readBytes[4] = {0, 0, 0, 0};
+            byte readBytes[32];
             uint8_t iterator = 0;
-            // numReadByte = Wire.requestFrom(ADDR_I2C_TO_EXT_BTN_CONTROLLER,4);
-            // numReadByte = numReadByte<5?numReadByte:4;
-            // for(uint8_t i=0;i<numReadByte;i++){
-            //     readBytes[i] = Wire.read();
-            // }
+            
+            uint8_t portsToRead = 0;
+            uint8_t numberOfBytesToRead = 1;
+            for(uint8_t i = 0; i < 4; i++) {
+                // if the input port is disabled in preferences, then we dont need to request an update for it
+                if( pref->PortModes[i] != ext_btn_modes::Disabled){ 
+                    portsToRead|= 1 << i;
+                    numberOfBytesToRead+=2;
+                }
+            }
 
             Wire.beginTransmission(ADDR_I2C_TO_EXT_BTN_CONTROLLER);
-            Wire.write(0);
-            Wire.write(0xaa);
-            Wire.write(0xaa);
-            // Wire.write(0xaa);
-            // Wire.write(0xaa);
-            // Wire.write(0xaa);
+            Wire.write(picoWireCommands::RequestUpdate|portsToRead);
             Wire.endTransmission();
+
+            
+            // Pico should now allow us to read 9 bytes ( 4 ports * 2 bytes each, and a byte for repsonse code / command)
+            numReadByte = Wire.requestFrom(ADDR_I2C_TO_EXT_BTN_CONTROLLER,(int)numberOfBytesToRead);
+            // numReadByte = numReadByte<5?numReadByte:4;
+            for(uint8_t i=0;i<numReadByte;i++){
+                readBytes[i] = Wire.read();
+                dbgserPrint_T(readBytes[3],HEX);    
+                dbgserPrint(":");
+            }
+            dbgserPrintln(".");
+
+
+
+
+            // Wire.beginTransmission(ADDR_I2C_TO_EXT_BTN_CONTROLLER);
+            // Wire.write(0);
+            // Wire.write(0xaa);
+            // Wire.write(0xaa);
+            // Wire.write(0xaa);
+            // Wire.write(0xaa);
+            // Wire.write(0xaa);
+            // Wire.endTransmission();
             
             // Wire.requestFrom(ADDR_I2C_TO_EXT_BTN_CONTROLLER,4);
             // Wire.readBytes(readBytes,4);

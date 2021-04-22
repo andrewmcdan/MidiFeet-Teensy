@@ -231,8 +231,6 @@ void LCDs_printCustomChar(byte lcdIdBitmask, byte charNum, int col, int row)
 /// \brief Must be called prior to any other LCD related function.
 void setupLCDs()
 {
-    Wire.begin(); // join i2c bus (address optional for master)
-    Wire.setClock(1000000);
     for (int i = 0; i < 5; i++)
     {
         Wire.beginTransmission(ADDR_I2C_TO_LCD); // transmit to device #8
@@ -1344,6 +1342,12 @@ void handleESP8266Serial()
             setCurrentScene(currentScene);
             break;
         }
+        case ESP_SERIAL_COMMANDS_Message::RequestForPreferences:
+        {
+            // @todo 
+            // Can probably copy most of the code from "request for scene file"
+            break;
+        }
         default:
             dbgserPrintln("No Matching command found.");
             break;
@@ -1483,6 +1487,8 @@ void setup()
     // ensure that LCD's text uypdate time is reasonable
     if((preferences.LCD_TextUpdateTime<100) || (preferences.LCD_TextUpdateTime>1000))
         preferences.LCD_TextUpdateTime=300;
+    Wire.begin(); // join i2c bus (address optional for master)
+    Wire.setClock(400000);
     setupLCDs();
     char someChars[] = "midiFT booting";
     LCDs_printText(0, someChars, 14, 2, 0);
@@ -1495,8 +1501,6 @@ void setup()
     if (!loadScenesFromFile())
         debugserialPrintln(1, "Error loading scenes from file");
 
-    
-
     for (uint8_t i = 0; i < 4; i++)
         HW_midi[i].begin(MIDI_CHANNEL_OMNI);
     updateHardwareMIDIthru();                          // sets thru enable based on preferences.passThrough.MIDItoMIDI[]
@@ -1505,34 +1509,10 @@ void setup()
 
     // load scene #1
     setCurrentScene(0);
-
     elapsedTimer1 = 0;
     elapsedTimer2 = 0;
     elapsedTimer3 = 0;
     elapsedTimer4 = 0;
-
-    // String aString = "this is string";
-    // String aNumString = String(aString.length());
-    // aString = aString + aNumString;
-    // aString.toCharArray(charBuf, 20);
-    // LCDs_printText(0, charBuf, aString.length(), 0, 0);
-    // char someChars[] = "midiFT is booting";
-    // LCDs_printText(0, someChars, 17, 0, 0);
-    // debugserialPrint(5,"EXTMEM 'midiFT' start address: ");
-    // debugserialPrintlnType(5,uint32_t(&midiFT), HEX);
-    // debugserialPrint(5,"EXTMEM 'midiFT.scenesArr' first address: ");
-    // debugserialPrintlnType(5,uint32_t(&midiFT.scenesArr[0]), HEX);
-    // debugserialPrint(5,"EXTMEM 'midiFT.scenesArr' second address: ");
-    // debugserialPrintlnType(5,uint32_t(&midiFT.scenesArr[1]), HEX);
-    // debugserialPrint(5,"EXTMEM 'midiFT.scenesArr' last address: ");
-    // debugserialPrintlnType(5,uint32_t(&midiFT.scenesArr[NUMBER_OF_SCENES - 1]) + (uint32_t(&midiFT.scenesArr[1]) - uint32_t(&midiFT.scenesArr[0])), HEX);
-
-    // debugserialPrint(5,"NextScene val: ");
-    // debugserialPrintlnType(5,buttonActions::NextScene,HEX);
-
-    // Tell the ESP8266 that we are ready for requests.
-    // ESP8266_Serial.write('A');
-
     debugserialPrintln(4, "Setup has completed. Continuing to 'loop'.");
 }
 
@@ -1619,14 +1599,6 @@ void loop()
     if (elapsedTimer1 > 200)
     { // ~ every 100us
         elapsedTimer1 = 0;
-        // loopCounterMark = loopCounter;
-        // if(loopCounter>loopCounterMax){
-        //     loopCounterMax=loopCounter;
-        // }
-        // if(loopCounter<loopCounterMin){
-        //     loopCounterMin=loopCounter;
-        // }
-        // loopCounter = 0;
         wireBufForLCDs.sendNextOutMessage();
         picoOBJ.update(currentScene);
         for(uint8_t i = 0; i < 10; i++ ){
@@ -1648,19 +1620,4 @@ void loop()
         elapsedTimer3 = 0;
         // dbgserPrint("Free RAM: ");
     }
-    // if(elapsedTimer4 > (1000 * 1000)){
-    //     elapsedTimer4 = 0;
-        // dbgserPrint("loopCoutner: ");
-        // dbgserPrintln_T(loopCounter,DEC);
-        // dbgserPrint("loopCoutnerMark: ");
-        // dbgserPrintln_T(loopCounterMark,DEC);
-        // dbgserPrint("loopCoutnerMin: ");
-        // dbgserPrintln_T(loopCounterMin,DEC);
-        // dbgserPrint("loopCoutnerMax: ");
-        // dbgserPrintln_T(loopCounterMax,DEC);
-        // dbgserPrintln("");
-    // }
-    // loopCounter++;
-    uint8_t nothing = 0;
-    bitWrite(nothing, 3, HIGH);
 }
