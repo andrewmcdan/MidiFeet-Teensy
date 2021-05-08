@@ -40,8 +40,6 @@ Display Text
 #define NUMBER_OF_SCENES 200 // 1500 max. Larger values make booting slower. Consider keeping this at ~500 or less.
 /* #endregion */
 
-// #include "midiFeet.h"
-// #include "midiFeet2.h"
 #include "include/midiFt_lib.cpp"
 #include <Wire.h>
 #include <MIDI.h>
@@ -49,11 +47,12 @@ Display Text
 #include <SPI.h>
 #include <EEPROM.h>
 #include <Bounce2.h>
-// #include <CRC32.h>
 #include <cstdint>
 // #include <NativeEthernet.h>
 
-
+void test(){
+    byte thing = 0;
+}
 /* #region Global Declarations */
 
 // The next 4 lines use a #define macro that expands to setup the instance.
@@ -86,6 +85,7 @@ bool sdCardInit = false;
 // bool ethernetLinkUp = false;
 // unsigned long ethernetLinkTimeout = 5000;     // milliseconds
 // unsigned long ethernetResponseTimeout = 5000; // milliseconds
+///\brief All of the user configurable settings.
 PrefsObj preferences = PrefsObj();
 ///\brief Object to hold all scene data. Is stored on PSRAM.
 EXTMEM SceneObj midiFT = SceneObj(NUMBER_OF_SCENES);
@@ -96,15 +96,15 @@ elapsedMicros elapsedTimer1, elapsedTimer2, elapsedTimer3, elapsedTimer4;
 ///\brief Buffer for i2c commands to LCD controllers
 WireBuffer wireBufForLCDs = WireBuffer();
 ///\brief Buffer for i2c commands to RasPi Pico
-WireBuffer wireBufForPICO = WireBuffer();
+// WireBuffer wireBufForPICO = WireBuffer();
 ///\brief Lookup table for button pin numbers and button de-bouncing objects.
 const uint8_t BtnPins[] = { 13, 41, 40, 39, 38, 37, 36, 33, 23, 22 };
 Bounce BtnDebouncer[10] = { Bounce(), Bounce(), Bounce(), Bounce(), Bounce(), Bounce(), Bounce(), Bounce(), Bounce(), Bounce() };
 ///\brief The currently selected scene.
 uint16_t currentScene = 0;
-// char charBuf[20];
+// Values to keep track of the current position of the "top row text" of each button.
 uint8_t topRowTextPositions[10] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
-///\brief Variables for freeram()
+// Variables for freeram()
 extern unsigned long _heap_start;
 extern unsigned long _heap_end;
 extern char* __brkval;
@@ -133,7 +133,8 @@ buttonActionQueue extActionQ[] = {
     buttonActionQueue(false,midiFT,HW_midi,setCurrentScene,preferences),
     buttonActionQueue(false,midiFT,HW_midi,setCurrentScene,preferences)
 };
-RasPiPico picoOBJ = RasPiPico(ADDR_I2C_TO_EXT_BTN_CONTROLLER, preferences);
+void extActionsQueueHandler(uint8_t btnNum, uint8_t scene, uint16_t val);
+RasPiPico picoOBJ = RasPiPico((uint8_t)ADDR_I2C_TO_EXT_BTN_CONTROLLER, preferences, extActionsQueueHandler);
 
 // unsigned long loopCounter = 0;
 // unsigned long loopCounterMark = 0;
@@ -165,6 +166,7 @@ int freeram();
 void loop();
 /* #endregion function definitions */
 
+
 /// \brief Calculate amount of free RAM
 /// \returns Integer representing number of available bytes.
 int freeram() {
@@ -174,16 +176,28 @@ int freeram() {
 /// \brief Handle button presses event
 /// \param btnID Id 0-9 of pressed button
 void buttonPressed(uint8_t btnID) {
-    debugserialPrint(4, "Button ");
-    debugserialPrint(4, btnID);
-    debugserialPrintln(4, " was pressed.");
-    // midiFT.scenesArr[currentScene].mainButtons[btnID].Actions[0].doAction(HW_midi);
+    // debugserialPrint(4, "Button ");
+    // debugserialPrint(4, btnID);
+    // debugserialPrintln(4, " was pressed.");
     for (uint8_t i = 0;i < 32;i++) {
         mainActionQ[btnID].addAction(btnID, i, currentScene);
         if (midiFT.scenesArr[currentScene].mainButtons[btnID].Actions[i + 1].action == 0xff)i = 32;
     }
-
 }
+
+void extActionsQueueHandler(uint8_t btnNum, uint8_t scene, uint16_t val) {
+    // btn numbers 0 to 7 are for TS/TRS button type pedals
+    if (btnNum < 8) {
+        for (uint8_t i = 0; i < 32; i++) {
+            extActionQ[btnNum].addAction(btnNum, i, scene);
+            if (midiFT.scenesArr[scene].extButtons[btnNum].Actions[i + 1].action == 0xff)i = 32;
+        }
+    } else {
+        // btn numbers >=8 are for expression pedals.
+        //@todo 
+    }
+}
+
 
 /// \brief Do literally nothing. Exists for debugging purposes.
 /// Compiler will almost certainly remove any call to this function.
@@ -717,6 +731,8 @@ bool loadPrefsFromFile() {
                     break;
                 }
                 case 4: { // Hardware midi port channel setting
+                    // Used for thru filtering when thru settings is midi::Thru::SameChannel or midi::Thru::DifferentChannel
+                    // Sets channel for selected port. 
                     for (int i = 0; i < 4; i++) {
                         while (readChar != ',' && readChar != '/') {
                             char temp[2] = { readChar, '\0' };
@@ -727,7 +743,6 @@ bool loadPrefsFromFile() {
                     }
                     while (readChar != '\n' && sdCardFile.available())
                         readChar = sdCardFile.read(); // read through comment if present
-
                     break;
                 }
                 case 5: { // arrow positions
@@ -781,6 +796,7 @@ bool loadPrefsFromFile() {
             }
         }
         sdCardFile.close();
+        picoOBJ.setConfig();
         return true;
     }
     sdCardFile.close();
@@ -1217,6 +1233,88 @@ void handleESP8266Serial() {
         case ESP_SERIAL_COMMANDS_Message::RequestForPreferences: {
             // @todo 
             // Can probably copy most of the code from "request for scene file"
+            dbgserPrintln("request for prefs file");
+            unsigned int err = 0;
+            char nameChars[] = "prefs.txt";
+            sdCardFile = SD.open(nameChars);
+            unsigned int sequenceNumber = 0;
+            unsigned long byteNumber = 0;
+            uint8_t outArr[16];
+            if (sdCardFile) {
+                unsigned long size = sdCardFile.size();
+                outArr[0] = uint8_t(size);
+                outArr[1] = uint8_t(size >> 8);
+                outArr[2] = uint8_t(size >> 16);
+                outArr[3] = uint8_t(size >> 24);
+                // dbgserPrintln("sending size to ESP");
+                sendDataToESP((ESP_SERIAL_DataType::FileSize | ESP_SERIAL_COMMANDS_Message::isMessageNotPacket), outArr, 4, false);
+                uint8_t count = 0;
+                while ((ESP8266_Serial.available() == 0) && (count < 255)) {
+                    count++;
+                    delay(1);
+                }
+                // dbgserPrintln("get command form esp");
+                getESPSerialData(pSizeAndErr);
+                // dbgserPrint("command \"");
+                uint8_t newCommand = ESP_ShortMessage.StartSequence_8 & 0x0f;
+                // dbgserPrint_T(newCommand, HEX);
+                // dbgserPrintln("\" received.");
+                if (newCommand != ESP_SERIAL_COMMANDS_Message::OkToStartSendingData || pSizeAndErr[1] > 0) {
+                    err += 8;
+                    break;
+                }
+                bool looping = true;
+                while (looping) {
+                    byte readByte;
+                    bool isLast = false;
+                    for (uint8_t i = 0;i < 16;i++) {
+                        if (sdCardFile.available()) {
+                            readByte = sdCardFile.read();
+                            outArr[i] = readByte;
+                            byteNumber++;
+                        } else {
+                            outArr[i] = 0;
+                            isLast = true;
+                        }
+                    }
+                    if (!isLast) {
+                        // command to send is 0xSSCD where SS is sequence number, C is start or continue, and D is scene data
+                        // dbgserPrint("sending some data. bytenumber: ");
+                        // dbgserPrintln(byteNumber);
+                        sendDataToESP(((byteNumber == 16 ? ESP_SERIAL_COMMANDS_Packet::StartSendData : ESP_SERIAL_COMMANDS_Packet::ContinueSendData) | ESP_SERIAL_COMMANDS_Packet::SavePreferences) | (sequenceNumber << 8), outArr, 16, true);
+                        count = 0;
+                        while ((ESP8266_Serial.available() == 0) && (count < 255)) {
+                            count++;
+                            delay(1);
+                        }
+                        getESPSerialData(pSizeAndErr);
+                        if (pSizeAndErr[1] > 0) {
+                            err += 16;
+                            break;
+                        }
+                        newCommand = ESP_ShortMessage.StartSequence_8 & 0x0f;
+                        if (newCommand != ESP_SERIAL_COMMANDS_Message::OkToContinueSendingData) {
+                            err += 8;
+                            break;
+                        }
+                    } else {
+                        // dbgserPrintln("sending the last data.");
+                        sendDataToESP((ESP_SERIAL_COMMANDS_Packet::EndSendData | ESP_SERIAL_COMMANDS_Packet::SavePreferences), outArr, 16, true);
+                        looping = false;
+                    }
+                    sequenceNumber++;
+                }
+                sdCardFile.close();
+            } else err++;
+            if (err != 0) {
+                dbgserPrint("err: ");
+                dbgserPrintln(err);
+            }
+            break;
+        }
+        case ESP_SERIAL_COMMANDS_Message::RequestToSavePrefsFile: {
+            //@todo 
+            loadPrefsFromFile(); //@note This should be the last thing to happen after saving preferences. 
             break;
         }
         default:
@@ -1372,7 +1470,16 @@ void setup() {
     elapsedTimer2 = 0;
     elapsedTimer3 = 0;
     elapsedTimer4 = 0;
+
+    picoOBJ.begin();
+    
     debugserialPrintln(4, "Setup has completed. Continuing to 'loop'.");
+
+
+
+
+
+    preferences.outPortModes[0] = ext_btn_modes::DualButton;
 }
 
 void loop() {
@@ -1459,6 +1566,5 @@ void loop() {
 
     if (elapsedTimer3 > (950 * 10000)) { // every 1s
         elapsedTimer3 = 0;
-        // dbgserPrint("Free RAM: ");
     }
 }

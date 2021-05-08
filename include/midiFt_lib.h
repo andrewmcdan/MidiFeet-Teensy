@@ -17,6 +17,9 @@
 
 #ifndef DEBUG
 #define DEBUG
+#ifndef DEBUG_LEVEL
+#define DEBUG_LEVEL 5
+#endif
 #endif
 
 #define F_CPU 720000000 // needed here to make VScode play nice.
@@ -85,7 +88,8 @@ enum extPedalMode {
     TRS_this_T,
     TRS_this_R,
     TS_this_T,
-    EXPRESSION
+    ExpressionContinuous,
+    ExpressionMinMax
 };
 enum out_port_state : byte {
     Tip_On = 0x01,
@@ -179,13 +183,14 @@ struct SceneObjSingle;
 struct SceneObj;
 struct ButtonActionQueue;
 
+// Preferences object. Contains all user configurable global settings. 
 struct PrefsObj {
     struct PASSTHROUGH_PREFS {
-        bool USBtoMIDI[4] = { true, true, true, true };
-        bool MIDItoUSB[4] = { true, true, true, true };
-        byte MIDItoMIDI[4] = { 1, 1, 1, 1 };
+        bool USBtoMIDI[4] = { true, true, true, true }; // Enable / disable passing midi messages from USB to midi out.
+        bool MIDItoUSB[4] = { true, true, true, true }; // Enable / disable passing midi messages from Midi In to USB.
+        byte MIDItoMIDI[4] = { 0, 0, 0, 0 }; // Enable / disable passing midi messages through midi port. see midi::Thru for definitions.
     };
-    byte channel[4] = { 0, 0, 0, 0 };
+    byte channel[4] = { 0, 0, 0, 0 }; // Port channel setting.
     byte backlightBrightness = 0;
     enum ArrowPositions : byte {
         TopRight_BtmRight = 0x00, // 0b00000000
@@ -193,19 +198,32 @@ struct PrefsObj {
         TopRight_BtmLeft = 0x02,  // 0b00000010
         TopLeft_BtmLeft = 0x03    // 0b00000011
     };
-    ArrowPositions arrowPos;
-    uint16_t totalNumberOfScenes, LCD_TextUpdateTime;
+    ArrowPositions arrowPos; // Arrow positions on LCD's
+    uint16_t totalNumberOfScenes, // User set-able. Allows fast boot time with low number of scenes. 
+        LCD_TextUpdateTime; // Interval to update the scrolling text on the LCD's
     byte expPedalUpdateIntervalPref = 50; // time in ms between updates on the exp pedal.
-    PASSTHROUGH_PREFS passThrough;
-    uint8_t PortModes[4] = {
+    PASSTHROUGH_PREFS passThrough; // Object that holds current midi passthrough preference
+    uint8_t outPortModes[4] = { // Mode of each output port.
         out_port_modes::Disable,
         out_port_modes::Disable,
         out_port_modes::Disable,
         out_port_modes::Disable,
     };
+    ext_btn_modes extInBtnMode[4] = { // Mode of each input port.
+        ext_btn_modes::DualButton,
+        ext_btn_modes::DualButton,
+        ext_btn_modes::DualButton,
+        ext_btn_modes::Disabled
+    };
+    // Polarity inversion settings for each input port. Useful for cases where the passthrough is
+    // used and the device plugged into the the passthrough requires inverted signalling.
+    bool extInBtnPolInv[4] = { true,false,false,false };
+    bool outputPortPolInv[4] = { false,false,false,false };
     PrefsObj() {};
 };
+// i2c/Wire buffer. 64 message FIFO buffer that can contain 64 byte messages. 
 struct WireBuffer {
+    // data buffer
     struct BUF {
         byte data[256];
         byte address;
@@ -217,7 +235,16 @@ struct WireBuffer {
     elapsedMicros microTime;
     BUF buffer[64];
     WireBuffer();
+    ///\brief Add an entry to wire buffer to be sent at some point in the future.
+    ///\param newData_addr Address to send this entry to.
+    ///\param newData_arr Data to send
+    ///\param newData_len Length of the data array.
+    ///\param newData_wait Optional. Minimum time to wait in microseconds from when the previous message was sent
+    /// to send this message. Useful for operations that stall the i2c device. 
+    ///\return True if the data was added to the buffer. False if the buffer was full.
     bool addEntryToBuffer(byte newData_addr, byte newData_arr[], uint8_t newData_len, uint16_t newData_wait = 0);
+    ///\brief Sends the next available message in th is buffer is wait time has been satisfied. Needs to be called
+    /// a regular basis.
     uint8_t sendNextOutMessage();
 };
 /// \brief Serial packet object containing 32bit start sequence (startSequence_32), 32bit crc (crc_32), and 16 bytes of data
@@ -254,9 +281,13 @@ struct SerialPacket {
 /// 1 byte start seq, (SHORT_MESSAGE_DATA_LENGTH) 4 bytes data, 1 byte crc.
 struct SerialMessage {
     union {
+        // Full array of bytes. Do not access directly. Use <SerialMessage>[i].
         uint8_t full_array[1 + SHORT_MESSAGE_DATA_LENGTH + 1];
+        // First byte in message. Command byte.
         NamedArrayElement<0, uint8_t> StartSequence_8;
+        // Last byte in message. CRC byte.
         NamedArrayElement<1 + SHORT_MESSAGE_DATA_LENGTH, uint8_t> crc_8;
+        // Data array. Contains only the bytes that make up the data portion of the message.
         SpecialNamedElement<1, uint8_t, SHORT_MESSAGE_DATA_LENGTH, uint8_t> data;
         // SpecialNamedElement<1,uint8_t,(SHORT_MESSAGE_DATA_LENGTH/4),uint32_t> data_32;
     };
@@ -266,6 +297,7 @@ struct SerialMessage {
     SerialMessage();
     uint8_t CalculateCRC();
 };
+// Queued action object. Contains data necessary for action queue to process. 
 struct qdAction {
     uint8_t buttonIdNum;
     uint16_t scnNum;
@@ -292,20 +324,31 @@ public:
     void turnOff();
     uint8_t OR_state();
 };
-struct ExtPedalState {
-    extPedalMode mode;
+
+struct ExtPedal_BtnState {
     bool fallingEdgeEvent;
     bool risingEdgeEvent;
     bool state_OPEN;
     bool state_CLOSED;
 };
+
 class ExtPedalInput {
 private:
-    ExtPedalState state_T;
-    ExtPedalState state_R;
+    ExtPedal_BtnState state_T;
+    ExtPedal_BtnState state_R;
+    // extPedalMode mode;
     // uint8_t portMode = ext_btn_modes::Disabled;
+    uint16_t expressionVal = 0;
 public:
-    ExtPedalInput(){};
+    ExtPedalInput() {};
+    void setState(bool tip, bool ring);
+    void setExpVal(uint16_t val);
+    bool tipState();
+    bool ringState();
+    bool isTipClosed();
+    bool isRingClosed();
+    bool isTipOpen();
+    bool isRingOpen();
     // uint8_t mode(){
     //     return this->portMode;
     // }
@@ -356,6 +399,7 @@ private:
     };
     elapsedMillis updateIntervalTimer = 0;
     PrefsObj* pref;
+    void (*qhandler_func)(uint8_t, uint8_t, uint16_t);
     enum picoWireCommands {
         OutputStateUpdate,
         SetOutputMode,
@@ -368,12 +412,18 @@ private:
 
 public:
     RasPiPico();
-    RasPiPico(uint8_t addr, PrefsObj& pref_R);
+    ///\brief Initialize RasPiPico object.
+    ///\param addr i2c address to the pico
+    ///\param pref_R The preferences object must be passed to this constructor in order for the methods to access it.
+    ///\param queueHandlerFunc A function that will handle queuing up actions for external input.
+    RasPiPico(uint8_t addr, PrefsObj& pref_R, void (*queueHandlerFunc)(uint8_t, uint8_t, uint16_t));
+    // Must be called after preferences have been loaded.
+    bool begin();
+    void setConfig();
     void toggleOutput(uint8_t port_num);
     void setOutputOn(uint8_t port_num);
     void setOutputOff(uint8_t port_num);
     void pulseOutput(uint8_t port_num, uint8_t time);
-    void setInputConfig(uint16_t sceneNum);
     void update(uint16_t currScn);
 };
 struct buttonActions {
@@ -397,6 +447,14 @@ struct buttonActions {
         ActionWait = 0x10,
         JumpToScene = 0x11,
         ExpPedalUpdateInterval = 0x12,
+        SendPlay,
+        SendStop,
+        SendContinue,
+        SeekToBeginning,
+        SendCustomMidiMessage,
+        MidiMangler_Start_Something,
+        MidiMangler_Stop_Something,
+        MidiMangler_OneShot,
         NULL_Action = 0xff // end of actions
     };
     ActionTypes action;
