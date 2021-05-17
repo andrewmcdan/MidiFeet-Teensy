@@ -1,22 +1,28 @@
+/**
+ *  Firmware sketch for Teensy in Midi foot controller.
+ *
+ *  Board:          Teensy 4.1
+ *  USB type:       Serial + MIDIx4
+ *  Clock Speed:    720MHz
+ *  
+ */
+
+
+/** cSpell settings: **/
 // ignores most of the code
 // cSpell:ignoreRegExp /(^(?!\s*(\/\/)|(\/\*)).*[;:)}=,{])/gm
-
 // ignores any word in quotes
 // cSpell:ignoreRegExp /\"\S*\"/g
-
 //--- ignores HEX literals
 // cSpell:ignoreRegExp /0x[A-Z]+/g
-
 //--- ignores any preprocessor directive (i.e #define)
 // cSpell:ignoreRegExp /(^#.*)/gm
-
 /// words to ignore
 // cSpell:ignore pico PSRAM btn btns spec'd dbgserPrintln dbgser Println
-
 /// spell check extension defaults to checking each part of camel case words as separate words.
 
-/*
 
+/*
 Commands:
 How to set up LCD's from i2c master:
 1. Set columns and rows - 4 bytes: 0x05, LCD_ID, cols, rows
@@ -26,10 +32,8 @@ Create Custom Chars
 1. Send for each character - 9 bytes: 0x2$ (where $ identifies character number 0 thru 7), character data for 8 bytes
 2. Send character data to LCD - 2 byte: 0x30, bit mask of LCD_IDs to send it to
       -This will send whatever is in the temporary custom character buffer.
-
 Display Text
 1. 2 + any number of bytes up to 30(buffer max of 32 bytes): 0xa$ ($ = LCD_ID), 0b $$@@ @@@@@ ($$ = row, @@@@@@ = col), text
-
 */
 
 // #include <Arduino.h>
@@ -81,6 +85,7 @@ SerialPacket ESP_SerPacket = SerialPacket();
 SerialMessage ESP_ShortMessage = SerialMessage();
 ///\brief File object for reading files from SD card
 File sdCardFile;
+File sdCardFile2;
 bool sdCardInit = false;
 // bool ethernetLinkUp = false;
 // unsigned long ethernetLinkTimeout = 5000;     // milliseconds
@@ -187,6 +192,12 @@ void buttonPressed(uint8_t btnID) {
 
 void extActionsQueueHandler(uint8_t btnNum, uint8_t scene, uint16_t val) {
     // btn numbers 0 to 7 are for TS/TRS button type pedals
+    dbgserPrint("handle queue for ext buttons. btnNum (DEC): ");
+    dbgserPrint_T(btnNum, DEC);
+    dbgserPrint("scene (DEC): ");
+    dbgserPrint_T(scene, DEC);
+    dbgserPrint("val (DEC): ");
+    dbgserPrintln_T(val, DEC);
     if (btnNum < 8) {
         for (uint8_t i = 0; i < 32; i++) {
             extActionQ[btnNum].addAction(btnNum, i, scene);
@@ -283,6 +294,17 @@ void setupLCDs() {
     LCDs_sendCustChar(0b00011111, 7, down2);
     LCDs_sendCustChar(0b00011111, 4, down3);
     LCDs_sendCustChar(0b00011111, 5, down4);
+    // const uint8_t arrowLocation[4][8] = {
+    //     {18, 19, 18, 19, 18, 19, 18, 19},
+    //     {0, 1, 0, 1, 18, 19, 18, 19},
+    //     {18, 19, 18, 19, 0, 1, 0, 1},
+    //     {0, 1, 0, 1, 0, 1, 0, 1} };
+    // for (uint8_t i = 0; i < 8; i++)
+    //     LCDs_printCustomChar(0b00011111, i, arrowLocation[preferences.arrowPos][i], i >> 1);
+    printLCDArrows();
+}
+
+void printLCDArrows() {
     const uint8_t arrowLocation[4][8] = {
         {18, 19, 18, 19, 18, 19, 18, 19},
         {0, 1, 0, 1, 18, 19, 18, 19},
@@ -1313,8 +1335,98 @@ void handleESP8266Serial() {
             break;
         }
         case ESP_SERIAL_COMMANDS_Message::RequestToSavePrefsFile: {
-            //@todo 
+
+            dbgserPrintln("request to prefs data");
+            unsigned int err = 0;
+            uint8_t newCommand = 0;
+            uint8_t outArr[4];
+            outArr[0] = 0;
+            outArr[1] = 0;
+            outArr[2] = 0;
+            outArr[3] = 0;
+            int sceneNumToSave = int(ESP_ShortMessage.data[0] | (ESP_ShortMessage.data[1] << 8));
+            char backupFileName[] = "prefs.bak";
+            char fileName[] = "prefs.txt";
+            // if the backup file exists, delete it.
+            if (SD.exists(backupFileName)) {
+                dbgserPrintln("backup file exists, deleting.");
+                SD.remove(backupFileName);
+            }
+            // open both the prefs file and the backup
+            sdCardFile2 = SD.open(backupFileName, FILE_WRITE);
+            sdCardFile = SD.open(fileName, FILE_READ);
+            // read the prefs file and write to backup
+            if (!sdCardFile || !sdCardFile2) {
+                dbgserPrintln("There was a problem with files. breaking.");
+                break;
+            }
+            dbgserPrintln("making backup of prefs");
+            while (sdCardFile.available()) {
+                sdCardFile2.write(sdCardFile.read());
+            }
+            dbgserPrintln("backup of prefs done");
+            // close both files
+            sdCardFile2.close();
+            sdCardFile.close();
+            dbgserPrintln("Deleting prefs.txt and writing new data.");
+            SD.remove(fileName);
+            // open prefs file for writing
+            sdCardFile = SD.open(fileName, FILE_WRITE);
+            if (sdCardFile) {
+                dbgserPrintln("sdCardFile opened for writing. Continuing...");
+                sendDataToESP(ESP_SERIAL_COMMANDS_Message::OkToStartSendingData | ESP_SERIAL_COMMANDS_Message::isMessageNotPacket, outArr, false);
+                getESPSerialData(pSizeAndErr);
+                if ((pSizeAndErr[0] != 24) || (pSizeAndErr[1] > 0)) {
+                    err += pSizeAndErr[1];
+                    dbgserPrint("There was a problem with rec's data. err: ");
+                    dbgserPrintln_T(err, HEX);
+                } else {
+                    newCommand = ESP_SerPacket.startSequence_32 & 0xff;
+                    if (newCommand == (ESP_SERIAL_COMMANDS_Packet::StartSendData | ESP_SERIAL_COMMANDS_Packet::SavePreferences)) {
+                        dbgserPrintln("Rec'd data seems ok. Saving to file.");
+                        do {
+                            dbgserPrint(".");
+                            for (uint8_t i = 0;i < 16;i++) {
+                                sdCardFile.write(ESP_SerPacket.data[i]);
+                            }
+                            sendDataToESP(ESP_SERIAL_COMMANDS_Message::OkToContinueSendingData | ESP_SERIAL_COMMANDS_Message::isMessageNotPacket, outArr, 0, false);
+                            getESPSerialData(pSizeAndErr);
+                            if ((pSizeAndErr[0] != 24) || (pSizeAndErr[1] > 0)) {
+                                newCommand = 0;
+                                dbgserPrintln("There was a problem with Rec'd data. line 1203");
+                            } else {
+                                newCommand = ESP_SerPacket.startSequence_32 & 0xff;
+                            }
+                        } while (newCommand == (ESP_SERIAL_COMMANDS_Packet::ContinueSendData | ESP_SERIAL_COMMANDS_Packet::SavePreferences));
+                        dbgserPrintln("Most recent rec's command was not a continue command. Checking for end command.");
+                        if (newCommand == (ESP_SERIAL_COMMANDS_Packet::EndSendData | ESP_SERIAL_COMMANDS_Packet::SavePreferences)) {
+                            dbgserPrintln("End command rec'd. saving data to file and closing.");
+                            for (uint8_t i = 0;i < 16;i++) {
+                                dbgserPrint(".");
+                                sdCardFile.write(ESP_SerPacket.data[i]);
+                                if (ESP_SerPacket.data[i + 1] == 0) {
+                                    i = 16;
+                                }
+                            }
+                            err = 0;
+                        } else {
+                            err = 128;
+                            dbgserPrintln("Did not rec expected end command. line 1221");
+                        }
+                    } else {
+                        err = 255;
+                        dbgserPrintln("did not rec expected start command.");
+                    }
+                }
+            } else {
+                dbgserPrintln("Unable to open sdCardFile. Send error command.");
+                sendDataToESP(ESP_SERIAL_COMMANDS_Packet::EndSendData | SERIAL_ERROR::SD_FILE_ERROR, outArr, 0, true);
+            }
+            sdCardFile.close();
             loadPrefsFromFile(); //@note This should be the last thing to happen after saving preferences. 
+            setLCDbrightness((preferences.backlightBrightness * 10) + 5);
+            printLCDArrows();
+            picoOBJ.setConfig();
             break;
         }
         default:
@@ -1454,15 +1566,13 @@ void setup() {
     // saveSceneDataToSD();///////////////////////////////////////////////////////////////////////////////////////
     ///////////////////////////////////////////////////////////////////////////////////////////////////////////
     debugserialPrintln(4, "Loading scenes from files");
-
     if (!loadScenesFromFile())
         debugserialPrintln(1, "Error loading scenes from file");
-
     for (uint8_t i = 0; i < 4; i++)
         HW_midi[i].begin(MIDI_CHANNEL_OMNI);
     updateHardwareMIDIthru();                          // sets thru enable based on preferences.passThrough.MIDItoMIDI[]
     delay(500);                                        // give other controllers a chance to boot
-    setLCDbrightness(preferences.backlightBrightness); // setLCDbrightness(getLCDbrightnessPref());
+    setLCDbrightness((preferences.backlightBrightness * 10) + 5); // setLCDbrightness(getLCDbrightnessPref());
 
     // load scene #1
     setCurrentScene(0);
@@ -1475,11 +1585,7 @@ void setup() {
     
     debugserialPrintln(4, "Setup has completed. Continuing to 'loop'.");
 
-
-
-
-
-    preferences.outPortModes[0] = ext_btn_modes::DualButton;
+    // preferences.outPortModes[0] = ext_btn_modes::DualButton;
 }
 
 void loop() {

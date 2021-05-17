@@ -136,14 +136,16 @@ enum ESP_SERIAL_DataType {
 enum ext_btn_modes : byte {
     SingleButton = 0x00,
     DualButton = 0x01,
-    ExpPedalMinMax = 0x03,
-    ExpPedalContinuous = 0x04,
-    Disabled = 0xff
+    ExpPedalMinMax = 0x02,
+    ExpPedalContinuous = 0x03,
+    MultiButton = 0x04,
+    AutoMode = 0x05, // will try to automatically determine if device connected is exp pedal, single or dual button.
+    Disabled = 0x06
 };
 enum out_port_modes : byte {
     SingleOutput = 0x00,
     DualOutput = 0x01,
-    Disable = 0xff,
+    Disable = 0x02,
     TS_output = SingleOutput,
     TRS_output = DualOutput
 };

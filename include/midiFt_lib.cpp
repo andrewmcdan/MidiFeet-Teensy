@@ -123,6 +123,7 @@ void RasPiPico::pulseOutput(uint8_t port_num, uint8_t time) {
     this->outputPort[port_num].pulseInProgress = true;
     this->outputPort[port_num].pulseTime = time * 10;
     this->outputPort[port_num].timer = 0;
+    dbgserPrint("pulse time: ");
     dbgserPrintln_T(time, HEX);
     toggleOutput(port_num);
 }
@@ -203,16 +204,53 @@ void RasPiPico::update(uint16_t currScn) {
             // if there was no timeout, we should have read the expected number of bytes into readBytes[].
 
             // first check the edge event flag.
-            if ((readBytes[0] & 0b00010000) == 0x10) {
+            if ((readBytes[0] & 0x10) == 0x10) {
+                dbgserPrint("readBytes[0] (BIN): ");
+                dbgserPrintln_T(readBytes[0], BIN);
+                dbgserPrint("readBytes[1] (BIN): ");
+                dbgserPrintln_T(readBytes[1], BIN);
+                dbgserPrint("readBytes[2] (BIN): ");
+                dbgserPrintln_T(readBytes[2], BIN);
                 // ...then get the data for the ports. 
-                for (uint8_t i = 0; i < 4; i++) {
-                    bool s_tip = (readBytes[1] & (1 << i)) > 0; // get state of tip
-                    bool s_ring = (readBytes[1] & (1 << (i + 4))) > 0; // get state of ring
-                    // check to ensure that this port is actually enabled and
-                    // invert s_tip if polarity inversion is enabled (s_tip != this->pref->extInBtnPolInv[i], has the effect of inverting s_tip when polinv is true.)
-                    // then send the btn number / identifier and the current scene number to the handler function.
-                    if ((s_tip != this->pref->extInBtnPolInv[i]) && ((this->pref->extInBtnMode[i] == ext_btn_modes::DualButton) || (this->pref->extInBtnMode[i] == ext_btn_modes::SingleButton)))       this->qhandler_func(i, this->currScn, 0);
-                    if ((s_ring != this->pref->extInBtnPolInv[i]) && (this->pref->extInBtnMode[i] == ext_btn_modes::DualButton))    this->qhandler_func(i + 4, this->currScn, 0);
+                uint8_t i = 0;
+                for (; i < 4; i++) {
+                    if ((readBytes[2] & (1 << i)) > 0) {
+                        bool s_tip = (readBytes[1] & (1 << i)) > 0; // get state of tip
+                        // bool s_ring = (readBytes[1] & (1 << (i + 4))) > 0; // get state of ring
+
+                        // check to ensure that this port is actually enabled and
+                        // invert s_tip if polarity inversion is enabled (s_tip != this->pref->extInBtnPolInv[i], has the effect of inverting s_tip when polinv is true.)
+                        // then send the btn number / identifier and the current scene number to the handler function.
+                        if ((s_tip != this->pref->extInBtnPolInv[i]) &&
+                            ((this->pref->extInBtnMode[i] == ext_btn_modes::DualButton) || (this->pref->extInBtnMode[i] == ext_btn_modes::SingleButton))
+                            ) {
+                            dbgserPrint("ext btn mode: ");
+                            dbgserPrintln_T(this->pref->extInBtnMode[i], HEX);
+                            this->qhandler_func(i, this->currScn, 0);
+                        }
+                        // if ((s_ring != this->pref->extInBtnPolInv[i]) && (this->pref->extInBtnMode[i] == ext_btn_modes::DualButton)) {
+                        //     this->qhandler_func(i + 4, this->currScn, 0);
+                        // }
+                    }
+                }
+                for (; i < 8; i++) {
+                    if ((readBytes[2] & (1 << i)) > 0) {
+                        // bool s_tip = (readBytes[1] & (1 << i)) > 0; // get state of tip
+                        bool s_ring = (readBytes[1] & (1 << i)) > 0; // get state of ring
+
+                        // check to ensure that this port is actually enabled and
+                        // invert s_tip if polarity inversion is enabled (s_tip != this->pref->extInBtnPolInv[i], has the effect of inverting s_tip when polinv is true.)
+                        // then send the btn number / identifier and the current scene number to the handler function.
+                        // if ((s_tip != this->pref->extInBtnPolInv[i]) && ((this->pref->extInBtnMode[i] == ext_btn_modes::DualButton) || (this->pref->extInBtnMode[i] == ext_btn_modes::SingleButton))) {
+                        //     this->qhandler_func(i, this->currScn, 0);
+
+                        // }
+                        if ((s_ring != this->pref->extInBtnPolInv[i - 4]) && (this->pref->extInBtnMode[i - 4] == ext_btn_modes::DualButton)) {
+                            dbgserPrint("ext btn mode: ");
+                            dbgserPrintln_T(this->pref->extInBtnMode[i - 4], HEX);
+                            this->qhandler_func(i, this->currScn, 0);
+                        }
+                    }
                 }
             }
 
@@ -246,7 +284,7 @@ void RasPiPico::update(uint16_t currScn) {
         if (this->outputPort[i].changePending) {
             this->outputPort[i].changePending = false;
             isAnyPending = true;
-
+            dbgserPrint("pending: ");
             dbgserPrintln_T(pending, BIN);
         }
         pending |= this->outputPort[i].OR_state();
@@ -390,6 +428,7 @@ bool buttonActions::doAction(midi::MidiInterface<midi::SerialMIDI<HardwareSerial
         unsigned long seconds = this->actionData[1];
         unsigned long milliseconds = this->actionData[2] * 10;
         actQ.timeToWait = milliseconds + (seconds * 1000) + (minutes * 60 * 1000);
+        dbgserPrint("actQ.timetoWait: ");
         dbgserPrintln_T(actQ.timeToWait, HEX);
         break;
     }
