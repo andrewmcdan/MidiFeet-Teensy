@@ -162,8 +162,10 @@ void RasPiPico::setConfig() { // @todo
 }
 void RasPiPico::update(uint16_t currScn) {
     this->currScn = currScn;
+    // dbgserPrintln("RaspiPico update()");
     if (this->updateIntervalTimer > pref->expPedalUpdateIntervalPref) {
         this->updateIntervalTimer = 0;
+        // dbgserPrintln("RaspiPico update() - inteval exceeded. proceeding.");
         // get update from PICO, and store values into private members
         int numReadByte;
         byte readBytes[32];
@@ -173,9 +175,10 @@ void RasPiPico::update(uint16_t currScn) {
         for (uint8_t i = 0; i < 4; i++) {
             // if this particular input is set to an expression pedal mode, we need to read 2 more bytes for it. 
             // We get the "button state" values every time, so no need to request them.
+            // dbgserPrintln(pref->extInBtnMode[i]);
             if (pref->extInBtnMode[i] == ext_btn_modes::ExpPedalContinuous || pref->extInBtnMode[i] == ext_btn_modes::ExpPedalMinMax) {
                 portsToRead |= 1 << i;
-                numberOfBytesToRead += 2;
+                numberOfBytesToRead++; //= 2;
             }
         }
 
@@ -189,14 +192,14 @@ void RasPiPico::update(uint16_t currScn) {
         Wire.setTimeout(25000);
 
         // Pico should now allow us to read 1 byte (acknowledge + edge event flag) +
-        // 3 bytes(input button states) + 2 bytes for each input configured for an 
+        // 3 bytes(input button states) + 1 bytes for each input configured for an 
         // expression pedal. 
         // Request the bytes and read them into readBytes[].
         numReadByte = Wire.requestFrom(ADDR_I2C_TO_EXT_BTN_CONTROLLER, (int) numberOfBytesToRead);
         for (uint8_t i = 0; i < numReadByte; i++) {
             readBytes[i] = Wire.read();
         }
-
+        // Serial.printf("numReadBytes: %d  numberOfBytesToRead: %d\n", numReadByte, numberOfBytesToRead);
         // check to see if timeout occurred.
         if (numReadByte != numberOfBytesToRead) {
             Serial.printf("i2c bus timed out while reading from PICO.\n");
@@ -262,7 +265,11 @@ void RasPiPico::update(uint16_t currScn) {
                 if ((readBytes[0] & (1 << i)) > 0) {
                     // readByte[1] and readByte[2] have data for button input types of all 4 ports. 
                     // Therefore we start at byte 4
-                    this->qhandler_func(i+8,this->currScn,readBytes[indexCount++]);
+                    if (this->extIns[i].getExpVal() != readBytes[indexCount]) {
+                        this->extIns[i].setExpVal(readBytes[indexCount]);
+                        this->qhandler_func(i + 8, this->currScn, this->extIns[i].getExpVal());
+                    }
+                    indexCount++;
                 }
             }
         }
@@ -326,8 +333,12 @@ bool ExtPedalInput::isRingOpen() {
     return this->state_R.state_OPEN;
 }
 
-void ExtPedalInput::setExpVal(uint16_t val) {
-    
+void ExtPedalInput::setExpVal(uint8_t val) {
+    this->expressionVal = val;
+}
+
+uint8_t ExtPedalInput::getExpVal() {
+    return this->expressionVal;
 }
 
 
@@ -340,10 +351,10 @@ void buttonActions::resetToDefaults() {
 ///\brief Do this action's thing. Send some data, toggle a thing, etc.
 bool buttonActions::doAction(midi::MidiInterface<midi::SerialMIDI<HardwareSerial>> midiDevice, qdAction& actQ, void (*SceneChange_F)(int), PrefsObj& prefs_R, RasPiPico& pico_R, uint16_t currScn) {
     midi::MidiInterface<midi::SerialMIDI<HardwareSerial>> devArr[] = { midiDevice };
-    return doAction(devArr, actQ, SceneChange_F, prefs_R, pico_R, currScn, true);
+    return doAction(devArr, actQ, SceneChange_F, prefs_R, pico_R, currScn, 0, true);
 }
 ///\brief Do this action's thing. Send some data, toggle a thing, etc.
-bool buttonActions::doAction(midi::MidiInterface<midi::SerialMIDI<HardwareSerial>> midiDevs[], qdAction& actQ, void (*SceneChange_F)(int), PrefsObj& prefs_R, RasPiPico& pico_R, uint16_t currScn, bool singleMidi) {
+bool buttonActions::doAction(midi::MidiInterface<midi::SerialMIDI<HardwareSerial>> midiDevs[], qdAction& actQ, void (*SceneChange_F)(int), PrefsObj& prefs_R, RasPiPico& pico_R, uint16_t currScn, uint8_t value, bool singleMidi) {
     actQ.hasBeenSent = true;
     dbgserPrintln("do Action");
     dbgserPrint("this->action: ");
@@ -375,6 +386,7 @@ bool buttonActions::doAction(midi::MidiInterface<midi::SerialMIDI<HardwareSerial
         byte midiChan = this->actionData[1];
         byte midiCC = this->actionData[2];
         byte midiCCval = this->actionData[3];
+        if (midiCCval == 128) midiCCval = value;
         midiDevs[midiOutPort].sendControlChange(midiCC, midiCCval, midiChan);
         break;
     }
@@ -598,13 +610,14 @@ void buttonActionQueue::setPicoObj(RasPiPico& pico_R) {
     this->pico_obj_P = &pico_R;
 }
 
-int buttonActionQueue::addAction(uint8_t btn, uint8_t num, uint16_t scene) {
+int buttonActionQueue::addAction(uint8_t btn, uint8_t num, uint16_t scene, uint8_t val = 0) {
     if (this->lastIn == this->firstOut - 1)
         return 0; // queue is full
     this->actionsQ[this->lastIn].actionNum = num;
     this->actionsQ[this->lastIn].buttonIdNum = btn;
     this->actionsQ[this->lastIn].scnNum = scene;
     this->actionsQ[this->lastIn].hasBeenSent = false;
+    this->actionsQ[this->lastIn].value = val;
     this->lastIn++;
     return this->lastIn - this->firstOut;
 }
@@ -617,6 +630,7 @@ int buttonActionQueue::processQueue(uint16_t currScn) {
     uint8_t btn = this->actionsQ[this->firstOut].buttonIdNum;
     uint8_t act = this->actionsQ[this->firstOut].actionNum;
     uint16_t scn = this->actionsQ[this->firstOut].scnNum;
+    uint8_t val = this->actionsQ[this->firstOut].value;
 
     // check to see if this act is a "wait action"
     // if so, check elapsed time since relevent action (first or previous)
@@ -633,10 +647,10 @@ int buttonActionQueue::processQueue(uint16_t currScn) {
         // if this is first time we've been here, call doAction() for the wait action to set the time it was called.
         if (!isSent) {
             if (this->isMainButtonQueue) {
-                dbgserPrintln("isFirst was true.");
-                scenes->scenesArr[scn].mainButtons[btn].Actions[act].doAction(midiDevs, this->actionsQ[this->firstOut], SceneChange_F, *pref_R, *pico_obj_P, currScn);
+                // dbgserPrintln("isFirst was true.");
+                scenes->scenesArr[scn].mainButtons[btn].Actions[act].doAction(midiDevs, this->actionsQ[this->firstOut], SceneChange_F, *pref_R, *pico_obj_P, currScn, val);
             } else {
-                scenes->scenesArr[scn].extButtons[btn].Actions[act].doAction(midiDevs, this->actionsQ[this->firstOut], SceneChange_F, *pref_R, *pico_obj_P, currScn);
+                scenes->scenesArr[scn].extButtons[btn].Actions[act].doAction(midiDevs, this->actionsQ[this->firstOut], SceneChange_F, *pref_R, *pico_obj_P, currScn, val);
             }
         }
         if (this->actionsQ[this->firstOut].elapsedSinceActionCalled > (this->actionsQ[this->firstOut].timeToWait * 0.95)) {
@@ -647,9 +661,9 @@ int buttonActionQueue::processQueue(uint16_t currScn) {
 
     // if it was not a wait action, call doAction for this action.
     if (this->isMainButtonQueue) {
-        scenes->scenesArr[scn].mainButtons[btn].Actions[act].doAction(midiDevs, this->actionsQ[this->firstOut], SceneChange_F, *pref_R, *pico_obj_P, currScn);
+        scenes->scenesArr[scn].mainButtons[btn].Actions[act].doAction(midiDevs, this->actionsQ[this->firstOut], SceneChange_F, *pref_R, *pico_obj_P, currScn, val);
     } else {
-        scenes->scenesArr[scn].extButtons[btn].Actions[act].doAction(midiDevs, this->actionsQ[this->firstOut], SceneChange_F, *pref_R, *pico_obj_P, currScn);
+        scenes->scenesArr[scn].extButtons[btn].Actions[act].doAction(midiDevs, this->actionsQ[this->firstOut], SceneChange_F, *pref_R, *pico_obj_P, currScn, val);
     }
     this->firstOut++;
     return this->lastIn - this->firstOut;

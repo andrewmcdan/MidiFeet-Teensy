@@ -138,7 +138,7 @@ buttonActionQueue extActionQ[] = {
     buttonActionQueue(false,midiFT,HW_midi,setCurrentScene,preferences),
     buttonActionQueue(false,midiFT,HW_midi,setCurrentScene,preferences)
 };
-void extActionsQueueHandler(uint8_t btnNum, uint8_t scene, uint16_t val);
+void extActionsQueueHandler(uint8_t btnNum, uint8_t scene, uint8_t val);
 RasPiPico picoOBJ = RasPiPico((uint8_t)ADDR_I2C_TO_EXT_BTN_CONTROLLER, preferences, extActionsQueueHandler);
 
 // unsigned long loopCounter = 0;
@@ -190,7 +190,7 @@ void buttonPressed(uint8_t btnID) {
     }
 }
 
-void extActionsQueueHandler(uint8_t btnNum, uint8_t scene, uint16_t val) {
+void extActionsQueueHandler(uint8_t btnNum, uint8_t scene, uint8_t val) {
     // btn numbers 0 to 7 are for TS/TRS button type pedals
     dbgserPrint("handle queue for ext buttons. btnNum (DEC): ");
     dbgserPrint_T(btnNum, DEC);
@@ -205,7 +205,12 @@ void extActionsQueueHandler(uint8_t btnNum, uint8_t scene, uint16_t val) {
         }
     } else {
         // btn numbers >=8 are for expression pedals.
+        // The only difference is that we need to send the value to the addAction func
         //@todo 
+        for (uint8_t i = 0; i < 32; i++) {
+            extActionQ[btnNum].addAction(btnNum, i, scene, val);
+            if (midiFT.scenesArr[scene].extButtons[btnNum].Actions[i + 1].action == 0xff)i = 32;
+        }
     }
 }
 
@@ -526,7 +531,7 @@ void loadSceneDataIntoPSRAM(unsigned int sceneNumber, unsigned int dataType, byt
         midiFT.scenesArr[sceneNumber].extButtons[externalButtonNum].Btn_Mode = ext_btn_modes(dataArray[0]);
         break;
     }
-    case 0x0060 ... 0x006f: { // ext button / exp pedsal actions->action
+    case 0x0060 ... 0x006f: { // ext button / exp pedal actions->action
         unsigned int externalButtonNum = dataType & 0x000f;
         for (uint8_t i = 0; i < arrayLength; i++) {
             midiFT.scenesArr[sceneNumber].extButtons[externalButtonNum].Actions[i].action = buttonActions::ActionTypes(dataArray[i]);

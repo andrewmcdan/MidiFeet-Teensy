@@ -215,7 +215,7 @@ struct PrefsObj {
         ext_btn_modes::DualButton,
         ext_btn_modes::DualButton,
         ext_btn_modes::DualButton,
-        ext_btn_modes::Disabled
+        ext_btn_modes::ExpPedalContinuous
     };
     // Polarity inversion settings for each input port. Useful for cases where the passthrough is
     // used and the device plugged into the the passthrough requires inverted signalling.
@@ -304,6 +304,7 @@ struct qdAction {
     uint8_t buttonIdNum;
     uint16_t scnNum;
     uint8_t actionNum;
+    uint8_t value;
     elapsedMillis elapsedSinceActionCalled = 0;
     unsigned long timeToWait = 0;
     bool hasBeenSent = false;
@@ -344,7 +345,8 @@ private:
 public:
     ExtPedalInput() {};
     void setState(bool tip, bool ring);
-    void setExpVal(uint16_t val);
+    void setExpVal(uint8_t val);
+    uint8_t getExpVal();
     bool tipState();
     bool ringState();
     bool isTipClosed();
@@ -401,7 +403,7 @@ private:
     };
     elapsedMillis updateIntervalTimer = 0;
     PrefsObj* pref;
-    void (*qhandler_func)(uint8_t, uint8_t, uint16_t);
+    void (*qhandler_func)(uint8_t, uint8_t, uint8_t);
     enum picoWireCommands {
         OutputStateUpdate,
         SetOutputMode,
@@ -463,7 +465,7 @@ struct buttonActions {
     byte actionData[16];
     void resetToDefaults();
     bool doAction(midi::MidiInterface<midi::SerialMIDI<HardwareSerial>> midiDevice, qdAction& actQ, void (*SceneChange_F)(int), PrefsObj& prefs_R, RasPiPico& pico_R, uint16_t currScn = 0);
-    bool doAction(midi::MidiInterface<midi::SerialMIDI<HardwareSerial>> midiDevs[], qdAction& actQ, void (*SceneChange_F)(int), PrefsObj& prefs_R, RasPiPico& pico_R, uint16_t currScn, bool singleMidi = false);
+    bool doAction(midi::MidiInterface<midi::SerialMIDI<HardwareSerial>> midiDevs[], qdAction& actQ, void (*SceneChange_F)(int), PrefsObj& prefs_R, RasPiPico& pico_R, uint16_t currScn, uint8_t value, bool singleMidi = false);
 };
 struct MAIN_BTN {
     char topRowText[50];       // 50 bytes
@@ -517,6 +519,6 @@ struct buttonActionQueue {
     unsigned long startTime;
     buttonActionQueue(bool isMain, SceneObj& scenes, midi::MidiInterface<midi::SerialMIDI<HardwareSerial>> midiDevs[], void (*SceneChange_F)(int), PrefsObj& pref_R);
     void setPicoObj(RasPiPico& pico_R);
-    int addAction(uint8_t btn, uint8_t num, uint16_t scene);
+    int addAction(uint8_t btn, uint8_t num, uint16_t scene, uint8_t value);
     int processQueue(uint16_t currScn = 0xffff);
 };
