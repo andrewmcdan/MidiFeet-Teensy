@@ -105,7 +105,7 @@ uint8_t OutputPortControl::OR_state() {
 
 void (RasPiPico::* qhandler_func)(uint8_t, uint8_t, uint16_t);
 RasPiPico::RasPiPico() {}
-RasPiPico::RasPiPico(uint8_t addr, PrefsObj& pref_R, void (*queueHandlerFunc)(uint8_t, uint8_t, uint16_t)) {
+RasPiPico::RasPiPico(uint8_t addr, PrefsObj& pref_R, void (*queueHandlerFunc)(uint8_t, uint8_t, uint8_t)) {
     this->address = addr;
     this->pref = &pref_R;
     this->qhandler_func = queueHandlerFunc;
@@ -137,7 +137,7 @@ void RasPiPico::setConfig() { // @todo
     // set the input / output modes from preferences.
     uint16_t allOutsModes = 0;
     for (uint8_t i = 0; i < 4; i++) {
-        allOutsModes = ((uint16_t) this->pref->outPortModes[i] & 0x000f) << (i * 4);
+        allOutsModes |= ((uint16_t) this->pref->outPortModes[i] & 0x000f) << (i * 4);
     }
 
     Wire.beginTransmission(ADDR_I2C_TO_EXT_BTN_CONTROLLER);
@@ -148,7 +148,7 @@ void RasPiPico::setConfig() { // @todo
     
     uint16_t allInsModes = 0;
     for (uint8_t i = 0; i < 4; i++) {
-        allInsModes = ((uint16_t) this->pref->extInBtnMode[i] & 0x000f) << (i * 4);
+        allInsModes |= ((uint16_t) this->pref->extInBtnMode[i] & 0x000f) << (i * 4);
     }
 
     Wire.beginTransmission(ADDR_I2C_TO_EXT_BTN_CONTROLLER);

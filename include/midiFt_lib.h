@@ -206,16 +206,16 @@ struct PrefsObj {
     byte expPedalUpdateIntervalPref = 50; // time in ms between updates on the exp pedal.
     PASSTHROUGH_PREFS passThrough; // Object that holds current midi passthrough preference
     uint8_t outPortModes[4] = { // Mode of each output port.
-        out_port_modes::Disable,
-        out_port_modes::Disable,
-        out_port_modes::Disable,
-        out_port_modes::Disable,
+        out_port_modes::DualOutput,
+        out_port_modes::DualOutput,
+        out_port_modes::DualOutput,
+        out_port_modes::DualOutput,
     };
     ext_btn_modes extInBtnMode[4] = { // Mode of each input port.
         ext_btn_modes::DualButton,
         ext_btn_modes::DualButton,
         ext_btn_modes::DualButton,
-        ext_btn_modes::ExpPedalContinuous
+        ext_btn_modes::DualButton
     };
     // Polarity inversion settings for each input port. Useful for cases where the passthrough is
     // used and the device plugged into the the passthrough requires inverted signalling.
@@ -420,7 +420,7 @@ public:
     ///\param addr i2c address to the pico
     ///\param pref_R The preferences object must be passed to this constructor in order for the methods to access it.
     ///\param queueHandlerFunc A function that will handle queuing up actions for external input.
-    RasPiPico(uint8_t addr, PrefsObj& pref_R, void (*queueHandlerFunc)(uint8_t, uint8_t, uint16_t));
+    RasPiPico(uint8_t addr, PrefsObj& pref_R, void (*queueHandlerFunc)(uint8_t, uint8_t, uint8_t));
     // Must be called after preferences have been loaded.
     bool begin();
     void setConfig();
